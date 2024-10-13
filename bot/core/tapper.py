@@ -26,6 +26,7 @@ from .headers import headers, headers_squads
 
 from random import randint, choices
 
+from .image_checker import get_cords_and_color
 from ..utils.firstrun import append_line_to_file
 
 
@@ -38,6 +39,7 @@ class Tapper:
         self.main_bot_peer = 'notpixel'
         self.squads_bot_peer = 'notgames_bot'
         self.joined = None
+        self.balance = 0
 
     async def get_tg_web_data(self, proxy: str | None, ref:str, bot_peer:str, short_name:str) -> str:
         if proxy:
@@ -298,49 +300,46 @@ class Tapper:
         paint_request = await http_client.post('https://notpx.app/api/v1/repaint/start',
                                                 json={"pixelId": int(yx), "newColor": color})
         paint_request.raise_for_status()
-        logger.success(f"{self.session_name} | Painted {yx} with color: {color}")
+        paint_request_json = await paint_request.json()
+        cur_balance = paint_request_json.get("balance", self.balance)
+        change = cur_balance - self.balance
+        if change <= 0:
+            change = "?"
+        self.balance = cur_balance
+        logger.success(f"{self.session_name} | Painted {yx} with color: {color} | got <e>+{change}</e>")
         await asyncio.sleep(delay=randint(delay_start, delay_end))
 
-    async def paint(self, http_client: aiohttp.ClientSession):
+    async def paint(self, http_client: aiohttp.ClientSession, retries=20):
         try:
             stats = await http_client.get('https://notpx.app/api/v1/mining/status')
             stats.raise_for_status()
             stats_json = await stats.json()
-            charges = stats_json['charges']
-            colors = ("#9C6926", "#00CCC0", "#bf4300",
-                      "#FFFFFF", "#000000", "#6D001A")
-            
-            color = random.choice(colors)
-
-            if await self.has_template(http_client=http_client) and random.randint(1, 7) != 3:
-                with open('bot/points3x/data.json', 'r') as file:
-                    squares = json.load(file)
-
-                field = squares[random.randint(0, len(squares) - 1)]
-                coords = field["coords"]
-                color3x = field["color"]
-
-                for _ in range(charges//2):
-                    yx = coords[random.randint(0, len(coords) - 1)]
-                    if randint(0, 10) == 5:
-                        color = random.choice(colors)
-                        logger.info(f"{self.session_name} | Changing color to {color}")
-                    await self.make_paint_request(http_client, yx, color, 2, 5)
-
+            charges = stats_json.get('charges', 24)
+            self.balance = stats_json.get('userBalance', 0)
+            maxCharges = stats_json.get('maxCharges', 24)
+            logger.info(f"{self.session_name} | Charges: <e>{charges}/{maxCharges}</e>")
+            if await self.has_template(http_client=http_client):
+                for _ in range(charges - 1):
+                    try:
+                        q = await get_cords_and_color()
+                    except Exception:
+                        logger.success(f"{self.session_name} | All pixels painted, well done soldier;)")
+                        return
+                    coords = q["coord"]
+                    color3x = q["color"]
+                    yx = coords
                     await self.make_paint_request(http_client, yx, color3x, 5, 10)
             else:
                 for _ in range(charges):
-                    x, y = randint(30, 970), randint(30, 970)
+                    x, y = randint(100, 900), randint(100, 900)
                     yx = f'{int(f"{y}{x}")+1}'
-                    if randint(0, 10) == 5:
-                        color = random.choice(colors)
-                        logger.info(f"{self.session_name} | Changing color to {color}")
-                        
-                    await self.make_paint_request(http_client, yx, color, 5, 10)
+                    await self.make_paint_request(http_client, yx, "#000000", 5, 10)
 
         except Exception as error:
             logger.error(f"{self.session_name} | Unknown error when painting: {error}")
-            await asyncio.sleep(delay=3)
+            await asyncio.sleep(delay=10)
+            if retries > 0:
+                await self.paint(http_client=http_client, retries=retries-1)
 
     async def upgrade(self, http_client: aiohttp.ClientSession):
         try:
@@ -405,8 +404,9 @@ class Tapper:
             squad_id = squads_json.get("mySquad", {"id": None}).get("id", None)
             return True if squad_id else False
         except Exception as error:
-            logger.error(f"{self.session_name} | Unknown error when claiming reward: {error}")
+            logger.error(f"{self.session_name} | Unknown error when checking squad reward: {error}")
             await asyncio.sleep(delay=3)
+            return True
 
     async def has_template(self, http_client: aiohttp.ClientSession):
         try:
@@ -475,9 +475,13 @@ class Tapper:
                     balance = await self.get_balance(http_client)
                     logger.info(f"{self.session_name} | Balance: <e>{balance}</e>")
 
-                    if randint(1, 3) == 2:
-                        if not await self.has_template(http_client=http_client):
-                            self.joined = False
+                    if not await self.has_template(http_client=http_client):
+                        self.joined = False
+                        delay = randint(60, 120)
+                        logger.info(f"{self.session_name} | Joining to template restart in {delay} seconds.")
+                        await asyncio.sleep(delay=delay)
+                        token_live_time = 0
+                        continue
 
                     if settings.AUTO_DRAW:
                         await self.paint(http_client=http_client)
@@ -486,6 +490,14 @@ class Tapper:
                         reward_status = await self.claim(http_client=http_client)
                         logger.info(f"{self.session_name} | Claim reward: <e>{reward_status}</e>")
 
+                    if True:
+                        if not await self.in_squad(http_client=http_client):
+                            tg_web_data = await self.get_tg_web_data(proxy=proxy, bot_peer=self.squads_bot_peer,
+                                                                     ref="cmVmPTQ2NDg2OTI0Ng==", short_name="squads")
+                            await self.join_squad(http_client, tg_web_data, user_agent)
+                        else:
+                            logger.success(f"{self.session_name} | You're already in squad")
+
                     if settings.AUTO_TASK:
                         logger.info(f"{self.session_name} | Auto task started")
                         await self.tasks(http_client=http_client)
@@ -493,13 +505,6 @@ class Tapper:
 
                     if settings.AUTO_UPGRADE:
                         reward_status = await self.upgrade(http_client=http_client)
-
-                    if not await self.in_squad(http_client=http_client):
-                        tg_web_data = await self.get_tg_web_data(proxy=proxy, bot_peer=self.squads_bot_peer,
-                                                                 ref="cmVmPTgxMDUyOTE5MA==", short_name="squads")
-                        await self.join_squad(http_client, tg_web_data, user_agent)
-                    else:
-                        logger.success(f"{self.session_name} | You're already in squad")
 
                     logger.info(f"{self.session_name} | Sleep <y>{round(sleep_time / 60, 1)}</y> min")
                     await asyncio.sleep(delay=sleep_time)

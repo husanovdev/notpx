@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     SLEEP_TIME: list[int] = [2700, 4200]
     START_DELAY: list[int] = [5, 100]
     AUTO_TASK: bool = True
-    TASKS_TO_DO: list[str] = ["paint20pixels", "x:notpixel", "x:notcoin", "channel:notcoin", "channel:notpixel_channel"]
+    TASKS_TO_DO: list[str] = ["paint20pixels", "x:notpixel", "x:notcoin", "channel:notcoin", "channel:notpixel_channel", "joinSquad", "jettonTask"]
     AUTO_DRAW: bool = True
     JOIN_TG_CHANNELS: bool = True
     CLAIM_REWARD: bool = True
@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     NIGHT_MODE: bool = True
     NIGHT_TIME: list[int] = [0, 7] #UTC HOURS
     NIGHT_CHECKING: list[int] = [3600, 7200]
-    ENERGY_LIMIT_MAX_LEVEL: int = 6
-    PAINT_REWARD_MAX_LEVEL: int = 7
+    ENERGY_LIMIT_MAX_LEVEL: int = 7
+    PAINT_REWARD_MAX_LEVEL: int = 1
     RECHARGE_SPEED_MAX_LEVEL: int = 11
     POINTS_3X: bool = False
 
