@@ -72,7 +72,7 @@ class Tapper:
                         platform='android',
                         app=types.InputBotAppShortName(bot_id=peer, short_name=short_name),
                         write_allowed=True,
-                        start_param="f810529190_s726120"
+                        start_param="f810529190_t"
                     ))
                     joined = True
                 else:
