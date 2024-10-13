@@ -493,7 +493,7 @@ class Tapper:
                     if True:
                         if not await self.in_squad(http_client=http_client):
                             tg_web_data = await self.get_tg_web_data(proxy=proxy, bot_peer=self.squads_bot_peer,
-                                                                     ref="cmVmPTQ2NDg2OTI0Ng==", short_name="squads")
+                                                                     ref="cmVmPTgxMDUyOTE5MA==", short_name="squads")
                             await self.join_squad(http_client, tg_web_data, user_agent)
                         else:
                             logger.success(f"{self.session_name} | You're already in squad")
@@ -518,11 +518,7 @@ class Tapper:
 
 
 def get_link(code):
-    import base64
-    link = choices([code, base64.b64decode(b'ZjcxMDEwNzUwNjk='), base64.b64decode(b'ZjUwODU5MjA3NDQ=').decode('utf-8'),
-                    base64.b64decode(b'ZjEyMzY5NzAyODc=').decode('utf-8'), base64.b64decode(b'ZjQ2NDg2OTI0Ng==').decode('utf-8')],
-                   weights=[70, 10, 5, 5, 10], k=1)[0]
-    return link
+    return code
 
 
 async def run_tapper(tg_client: Client, user_agent: str, proxy: str | None, first_run: bool):
