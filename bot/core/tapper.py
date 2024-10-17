@@ -26,7 +26,7 @@ from .headers import headers, headers_squads
 
 from random import randint, choices
 
-from .image_checker import get_cords_and_color
+from .image_checker import get_cords_and_color, template_to_join, inform
 from ..utils.firstrun import append_line_to_file
 
 
@@ -40,6 +40,8 @@ class Tapper:
         self.squads_bot_peer = 'notgames_bot'
         self.joined = None
         self.balance = 0
+        self.template_to_join = 0
+        self.user_id = 0
 
     async def get_tg_web_data(self, proxy: str | None, ref:str, bot_peer:str, short_name:str) -> str:
         if proxy:
@@ -72,9 +74,9 @@ class Tapper:
                         platform='android',
                         app=types.InputBotAppShortName(bot_id=peer, short_name=short_name),
                         write_allowed=True,
-                        start_param="f810529190_t"
+                        start_param=f"f{self.template_to_join}_t"
                     ))
-                    joined = True
+                    self.joined = True
                 else:
                     web_view = await self.tg_client.invoke(RequestAppWebView(
                         peer=peer,
@@ -102,12 +104,15 @@ class Tapper:
 
             start_param = re.findall(r'start_param=([^&]+)', tg_web_data)
 
+            user = re.findall(r'user=([^&]+)', tg_web_data)[0]
+            self.user_id = json.loads(user)['id']
+
             init_data = {
                 'auth_date': re.findall(r'auth_date=([^&]+)', tg_web_data)[0],
                 'chat_instance': re.findall(r'chat_instance=([^&]+)', tg_web_data)[0],
                 'chat_type': re.findall(r'chat_type=([^&]+)', tg_web_data)[0],
                 'hash': re.findall(r'hash=([^&]+)', tg_web_data)[0],
-                'user': quote(re.findall(r'user=([^&]+)', tg_web_data)[0]),
+                'user': quote(user),
             }
 
             if start_param:
@@ -126,7 +131,6 @@ class Tapper:
 
             if self.tg_client.is_connected:
                 await self.tg_client.disconnect()
-
             return auth_token
 
         except InvalidSession as error:
@@ -141,11 +145,6 @@ class Tapper:
         custom_headers['User-Agent'] = user_agent
         bearer_token = None
         try:
-            response = await http_client.get(url='https://ipinfo.io/ip', timeout=aiohttp.ClientTimeout(20))
-            ip = (await response.text())
-
-            logger.info(f"{self.session_name} | NotGames logging in with proxy IP: {ip}")
-
             custom_headers["Host"] = "api.notcoin.tg"
             custom_headers["bypass-tunnel-reminder"] = "x"
             custom_headers["TE"] = "trailers"
@@ -198,11 +197,16 @@ class Tapper:
             await asyncio.sleep(delay=randint(3, 7))
             await self.login(http_client)
 
-    async def check_proxy(self, http_client: aiohttp.ClientSession, proxy: Proxy) -> None:
+    async def check_proxy(self, http_client: aiohttp.ClientSession, service_name, proxy: Proxy) -> None:
         try:
-            response = await http_client.get(url='https://ipinfo.io/ip', timeout=aiohttp.ClientTimeout(20))
-            ip = (await response.text())
-            logger.info(f"{self.session_name} | Proxy IP: {ip}")
+            response = await http_client.get(url='https://ipinfo.io/json', timeout=aiohttp.ClientTimeout(20))
+            response.raise_for_status()
+
+            response_json = await response.json()
+            ip = response_json.get('ip', 'NO')
+            country = response_json.get('country', 'NO')
+
+            logger.info(f"{self.session_name} | Logging in with proxy IP {ip} and country {country}")
         except Exception as error:
             logger.error(f"{self.session_name} | Proxy: {proxy} | Error: {error}")
 
@@ -304,9 +308,9 @@ class Tapper:
         cur_balance = paint_request_json.get("balance", self.balance)
         change = cur_balance - self.balance
         if change <= 0:
-            change = "?"
+            change = 0
         self.balance = cur_balance
-        logger.success(f"{self.session_name} | Painted {yx} with color: {color} | got <e>+{change}</e>")
+        logger.success(f"{self.session_name} | Painted {yx} with color: {color} | got <e>+{change:.2f}</e>")
         await asyncio.sleep(delay=randint(delay_start, delay_end))
 
     async def paint(self, http_client: aiohttp.ClientSession, retries=20):
@@ -318,25 +322,18 @@ class Tapper:
             self.balance = stats_json.get('userBalance', 0)
             maxCharges = stats_json.get('maxCharges', 24)
             logger.info(f"{self.session_name} | Charges: <e>{charges}/{maxCharges}</e>")
-            if await self.has_template(http_client=http_client):
-                for _ in range(charges - 1):
-                    try:
-                        q = await get_cords_and_color()
-                    except Exception:
-                        logger.success(f"{self.session_name} | All pixels painted, well done soldier;)")
-                        return
-                    coords = q["coord"]
-                    color3x = q["color"]
-                    yx = coords
-                    await self.make_paint_request(http_client, yx, color3x, 5, 10)
-            else:
-                for _ in range(charges):
-                    x, y = randint(100, 900), randint(100, 900)
-                    yx = f'{int(f"{y}{x}")+1}'
-                    await self.make_paint_request(http_client, yx, "#000000", 5, 10)
+            for _ in range(charges - 1):
+                try:
+                    q = await get_cords_and_color(user_id=self.user_id, template=self.template_to_join)
+                except Exception as error:
+                    logger.info(f"{self.session_name} | No pixels to paint")
+                    return
+                coords = q["coords"]
+                color3x = q["color"]
+                yx = coords
+                await self.make_paint_request(http_client, yx, color3x, 5, 10)
 
         except Exception as error:
-            logger.error(f"{self.session_name} | Unknown error when painting: {error}")
             await asyncio.sleep(delay=10)
             if retries > 0:
                 await self.paint(http_client=http_client, retries=retries-1)
@@ -408,13 +405,34 @@ class Tapper:
             await asyncio.sleep(delay=3)
             return True
 
-    async def has_template(self, http_client: aiohttp.ClientSession):
+    async def notpx_template(self, http_client: aiohttp.ClientSession):
         try:
             stats_req = await http_client.get(f'https://notpx.app/api/v1/image/template/my')
             stats_req.raise_for_status()
+            cur_template = await stats_req.json()
+            cur_template = cur_template["id"]
+            return cur_template
         except Exception as error:
+            return 0
+
+    async def j_template(self, http_client: aiohttp.ClientSession, template_id):
+        try:
+            resp = await http_client.put(f"https://notpx.app/api/v1/image/template/subscribe/{template_id}")
+            resp.raise_for_status()
+            await asyncio.sleep(randint(1, 3))
+            return resp.status == 204
+        except Exception as error:
+            logger.error(f"Unknown error upon joining a template: {error}")
             return False
-        return True
+
+    async def join_template(self, http_client: aiohttp.ClientSession):
+        try:
+            tmpl = await self.notpx_template(http_client)
+            self.template_to_join = await template_to_join(tmpl)
+            return str(tmpl) != self.template_to_join
+        except Exception as error:
+            pass
+        return False
 
     def generate_random_string(self, length=8):
         characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -432,7 +450,7 @@ class Tapper:
 
         async with aiohttp.ClientSession(headers=headers, connector=proxy_conn, trust_env=True) as http_client:
             if proxy:
-                await self.check_proxy(http_client=http_client, proxy=proxy)
+                await self.check_proxy(http_client=http_client, service_name="NotPixel", proxy=proxy)
 
             ref = settings.REF_ID
             link = get_link(ref)
@@ -475,13 +493,17 @@ class Tapper:
                     balance = await self.get_balance(http_client)
                     logger.info(f"{self.session_name} | Balance: <e>{balance}</e>")
 
-                    if not await self.has_template(http_client=http_client):
-                        self.joined = False
-                        delay = randint(60, 120)
-                        logger.info(f"{self.session_name} | Joining to template restart in {delay} seconds.")
-                        await asyncio.sleep(delay=delay)
-                        token_live_time = 0
-                        continue
+                    await inform(self.user_id, balance)
+
+                    if await self.join_template(http_client=http_client):
+                        tmpl_req = await self.j_template(http_client=http_client, template_id=self.template_to_join)
+                        if not tmpl_req:
+                            self.joined = False
+                            delay = randint(60, 120)
+                            logger.info(f"{self.session_name} | Joining to template restart in {delay} seconds.")
+                            await asyncio.sleep(delay=delay)
+                            token_live_time = 0
+                            continue
 
                     if settings.AUTO_DRAW:
                         await self.paint(http_client=http_client)
